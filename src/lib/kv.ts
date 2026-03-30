@@ -1,7 +1,3 @@
-import { kv } from "@vercel/kv";
-
-export { kv };
-
 export interface LupeStatus {
   status: "active" | "idle" | "error";
   session_type: string;
@@ -23,20 +19,76 @@ export interface SystemHealthData {
   updated_at: string;
 }
 
+function isKvConfigured(): boolean {
+  return !!(process.env.KV_URL || process.env.KV_REST_API_URL);
+}
+
+async function getKv() {
+  const { kv } = await import("@vercel/kv");
+  return kv;
+}
+
 export async function getLupeStatus(): Promise<LupeStatus | null> {
-  return kv.get<LupeStatus>("lupe:status");
+  if (!isKvConfigured()) return null;
+  try {
+    const kv = await getKv();
+    return kv.get<LupeStatus>("lupe:status");
+  } catch (e) {
+    console.error("KV getLupeStatus error:", e);
+    return null;
+  }
 }
 
 export async function setLupeStatus(status: LupeStatus): Promise<void> {
-  await kv.set("lupe:status", status);
+  if (!isKvConfigured()) return;
+  try {
+    const kv = await getKv();
+    await kv.set("lupe:status", status);
+  } catch (e) {
+    console.error("KV setLupeStatus error:", e);
+  }
 }
 
 export async function getSystemHealth(): Promise<SystemHealthData | null> {
-  return kv.get<SystemHealthData>("lupe:system-health");
+  if (!isKvConfigured()) return null;
+  try {
+    const kv = await getKv();
+    return kv.get<SystemHealthData>("lupe:system-health");
+  } catch (e) {
+    console.error("KV getSystemHealth error:", e);
+    return null;
+  }
 }
 
 export async function setSystemHealth(
   health: SystemHealthData
 ): Promise<void> {
-  await kv.set("lupe:system-health", health);
+  if (!isKvConfigured()) return;
+  try {
+    const kv = await getKv();
+    await kv.set("lupe:system-health", health);
+  } catch (e) {
+    console.error("KV setSystemHealth error:", e);
+  }
+}
+
+export async function kvGet<T>(key: string): Promise<T | null> {
+  if (!isKvConfigured()) return null;
+  try {
+    const kv = await getKv();
+    return kv.get<T>(key);
+  } catch (e) {
+    console.error(`KV get error for ${key}:`, e);
+    return null;
+  }
+}
+
+export async function kvSet(key: string, value: unknown): Promise<void> {
+  if (!isKvConfigured()) return;
+  try {
+    const kv = await getKv();
+    await kv.set(key, value);
+  } catch (e) {
+    console.error(`KV set error for ${key}:`, e);
+  }
 }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 function getWorkspaceFromTeamId(teamId: string): string {
   if (teamId === process.env.CLICKUP_TEAM_HERZEN) return "herzen";
   if (teamId === process.env.CLICKUP_TEAM_SKYDEO) return "skydeo";

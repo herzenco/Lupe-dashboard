@@ -1,9 +1,51 @@
-import { sql } from "@vercel/postgres";
+function isDbConfigured(): boolean {
+  return !!process.env.POSTGRES_URL;
+}
 
-export { sql };
+async function getDb() {
+  const { sql } = await import("@vercel/postgres");
+  return sql;
+}
+
+// Safe query wrapper — returns empty result if DB not configured
+export async function query(
+  strings: TemplateStringsArray,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ...values: any[]
+) {
+  if (!isDbConfigured()) {
+    return { rows: [], rowCount: 0 };
+  }
+  const sql = await getDb();
+  return sql(strings, ...values);
+}
+
+// Re-export as sql for backwards compatibility
+export const sql = query;
+
+// Raw query for dynamic SQL (parameterized string + values array)
+export async function rawQuery(queryText: string, params: unknown[] = []) {
+  if (!isDbConfigured()) {
+    return { rows: [], rowCount: 0 };
+  }
+  const { db } = await import("@vercel/postgres");
+  const pool = db;
+  const client = await pool.connect();
+  try {
+    return await client.query(queryText, params);
+  } finally {
+    client.release();
+  }
+}
 
 export async function initializeDatabase() {
-  await sql`
+  if (!isDbConfigured()) {
+    throw new Error("Database not configured — set POSTGRES_URL environment variable");
+  }
+
+  const db = await getDb();
+
+  await db`
     CREATE TABLE IF NOT EXISTS heartbeats (
       id SERIAL PRIMARY KEY,
       status VARCHAR(20) NOT NULL,
@@ -14,7 +56,7 @@ export async function initializeDatabase() {
     )
   `;
 
-  await sql`
+  await db`
     CREATE TABLE IF NOT EXISTS activity_log (
       id SERIAL PRIMARY KEY,
       action VARCHAR(100) NOT NULL,
@@ -27,7 +69,7 @@ export async function initializeDatabase() {
     )
   `;
 
-  await sql`
+  await db`
     CREATE TABLE IF NOT EXISTS daily_costs (
       id SERIAL PRIMARY KEY,
       date DATE NOT NULL,
@@ -41,7 +83,7 @@ export async function initializeDatabase() {
     )
   `;
 
-  await sql`
+  await db`
     CREATE TABLE IF NOT EXISTS tasks (
       id VARCHAR(50) PRIMARY KEY,
       workspace VARCHAR(20) NOT NULL,
@@ -63,7 +105,7 @@ export async function initializeDatabase() {
     )
   `;
 
-  await sql`
+  await db`
     CREATE TABLE IF NOT EXISTS task_comments (
       id VARCHAR(50) PRIMARY KEY,
       task_id VARCHAR(50) REFERENCES tasks(id) ON DELETE CASCADE,
@@ -73,7 +115,7 @@ export async function initializeDatabase() {
     )
   `;
 
-  await sql`
+  await db`
     CREATE TABLE IF NOT EXISTS sessions (
       id SERIAL PRIMARY KEY,
       session_id VARCHAR(100),
@@ -89,7 +131,7 @@ export async function initializeDatabase() {
     )
   `;
 
-  await sql`
+  await db`
     CREATE TABLE IF NOT EXISTS system_health (
       id SERIAL PRIMARY KEY,
       gateway_status VARCHAR(20),

@@ -3,6 +3,8 @@ import { sql } from "@/lib/db";
 import { validateLupeApiKey } from "@/lib/auth";
 import { setSystemHealth } from "@/lib/kv";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(request: NextRequest) {
   if (!validateLupeApiKey(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

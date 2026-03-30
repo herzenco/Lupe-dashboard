@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { getLupeStatus, getSystemHealth } from "@/lib/kv";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const authError = await requireAuth();
   if (authError) return authError;

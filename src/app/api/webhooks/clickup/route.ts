@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import crypto from "crypto";
 
+export const dynamic = "force-dynamic";
+
 function verifyWebhookSignature(
   body: string,
   signature: string | null

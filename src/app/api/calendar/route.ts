@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateLupeApiKey, requireAuth } from "@/lib/auth";
-import { kv } from "@/lib/kv";
+import { kvGet, kvSet } from "@/lib/kv";
+
+export const dynamic = "force-dynamic";
 
 const CALENDAR_KV_KEY = "lupe:calendar";
 
@@ -11,7 +13,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    await kv.set(CALENDAR_KV_KEY, body);
+    await kvSet(CALENDAR_KV_KEY, body);
 
     return NextResponse.json({ ok: true });
   } catch (error) {
@@ -28,7 +30,7 @@ export async function GET() {
   if (authError) return authError;
 
   try {
-    const data = await kv.get(CALENDAR_KV_KEY);
+    const data = await kvGet(CALENDAR_KV_KEY);
     return NextResponse.json(data || { events: [] });
   } catch (error) {
     console.error("Calendar GET error:", error);

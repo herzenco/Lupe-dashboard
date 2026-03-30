@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { rawQuery } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const authError = await requireAuth();
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest) {
 
     query += ` ORDER BY updated_at DESC NULLS LAST`;
 
-    const result = await sql.query(query, params);
+    const result = await rawQuery(query, params);
 
     return NextResponse.json(result.rows);
   } catch (error) {
