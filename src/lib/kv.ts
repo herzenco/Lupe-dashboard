@@ -1,3 +1,5 @@
+import { sql, rawQuery } from "./db";
+
 export interface LupeStatus {
   status: "active" | "idle" | "error";
   session_type: string;
@@ -19,76 +21,88 @@ export interface SystemHealthData {
   updated_at: string;
 }
 
-function isKvConfigured(): boolean {
-  return !!(process.env.KV_URL || process.env.KV_REST_API_URL);
-}
-
-async function getKv() {
-  const { kv } = await import("@vercel/kv");
-  return kv;
-}
-
+// Read latest heartbeat from Postgres as the "cached" status
 export async function getLupeStatus(): Promise<LupeStatus | null> {
-  if (!isKvConfigured()) return null;
   try {
-    const kv = await getKv();
-    return kv.get<LupeStatus>("lupe:status");
+    const result = await rawQuery(
+      `SELECT status, session_type, current_task, current_model, created_at
+       FROM heartbeats ORDER BY created_at DESC LIMIT 1`
+    );
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0];
+    return {
+      status: row.status,
+      session_type: row.session_type || "",
+      current_task: row.current_task || "",
+      current_model: row.current_model || "",
+      last_heartbeat: row.created_at?.toISOString?.() || new Date().toISOString(),
+    };
   } catch (e) {
-    console.error("KV getLupeStatus error:", e);
+    console.error("getLupeStatus error:", e);
     return null;
   }
 }
 
-export async function setLupeStatus(status: LupeStatus): Promise<void> {
-  if (!isKvConfigured()) return;
-  try {
-    const kv = await getKv();
-    await kv.set("lupe:status", status);
-  } catch (e) {
-    console.error("KV setLupeStatus error:", e);
-  }
+// No-op — heartbeat route already inserts into heartbeats table
+export async function setLupeStatus(_status: LupeStatus): Promise<void> {
+  // Data is already written to heartbeats table by the heartbeat route
+  // This function exists to maintain the interface
 }
 
+// Read latest system health from Postgres
 export async function getSystemHealth(): Promise<SystemHealthData | null> {
-  if (!isKvConfigured()) return null;
   try {
-    const kv = await getKv();
-    return kv.get<SystemHealthData>("lupe:system-health");
+    const result = await rawQuery(
+      `SELECT * FROM system_health ORDER BY created_at DESC LIMIT 1`
+    );
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0];
+    return {
+      gateway_status: row.gateway_status || "unknown",
+      gateway_uptime_seconds: Number(row.gateway_uptime_seconds) || 0,
+      mac_uptime_seconds: Number(row.mac_uptime_seconds) || 0,
+      cpu_percent: Number(row.cpu_percent) || 0,
+      memory_percent: Number(row.memory_percent) || 0,
+      disk_percent: Number(row.disk_percent) || 0,
+      telegram_status: row.telegram_status || "unknown",
+      drive_sync_status: row.drive_sync_status || "unknown",
+      error_log: row.error_log || [],
+      updated_at: row.created_at?.toISOString?.() || new Date().toISOString(),
+    };
   } catch (e) {
-    console.error("KV getSystemHealth error:", e);
+    console.error("getSystemHealth error:", e);
     return null;
   }
 }
 
-export async function setSystemHealth(
-  health: SystemHealthData
-): Promise<void> {
-  if (!isKvConfigured()) return;
-  try {
-    const kv = await getKv();
-    await kv.set("lupe:system-health", health);
-  } catch (e) {
-    console.error("KV setSystemHealth error:", e);
-  }
+// No-op — system-health route already inserts into system_health table
+export async function setSystemHealth(_health: SystemHealthData): Promise<void> {
+  // Data is already written to system_health table by the system-health route
 }
 
+// Generic KV get — uses a kv_store table in Postgres
 export async function kvGet<T>(key: string): Promise<T | null> {
-  if (!isKvConfigured()) return null;
   try {
-    const kv = await getKv();
-    return kv.get<T>(key);
+    const result = await sql`SELECT value FROM kv_store WHERE key = ${key}`;
+    if (result.rows.length === 0) return null;
+    return result.rows[0].value as T;
   } catch (e) {
-    console.error(`KV get error for ${key}:`, e);
+    console.error(`kvGet error for ${key}:`, e);
     return null;
   }
 }
 
+// Generic KV set — upserts into kv_store table
 export async function kvSet(key: string, value: unknown): Promise<void> {
-  if (!isKvConfigured()) return;
   try {
-    const kv = await getKv();
-    await kv.set(key, value);
+    await sql`
+      INSERT INTO kv_store (key, value, updated_at)
+      VALUES (${key}, ${JSON.stringify(value)}::jsonb, NOW())
+      ON CONFLICT (key) DO UPDATE SET
+        value = EXCLUDED.value,
+        updated_at = NOW()
+    `;
   } catch (e) {
-    console.error(`KV set error for ${key}:`, e);
+    console.error(`kvSet error for ${key}:`, e);
   }
 }
