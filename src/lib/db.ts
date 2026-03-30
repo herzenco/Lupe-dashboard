@@ -1,23 +1,24 @@
-import dns from "dns";
-import { Pool, QueryResultRow } from "pg";
+import { Client, QueryResultRow } from "pg";
 
-// Force IPv4 to avoid IPv6 routing issues with Supabase
-dns.setDefaultResultOrder("ipv4first");
+// Force IPv4 for local dev (Supabase only has AAAA records)
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const dns = require("dns");
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  // ignore — dns module may not be available in all runtimes
+}
 
-let pool: Pool | null = null;
-
-function getPool(): Pool {
-  if (!pool) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is not set");
-    }
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 10,
-    });
+async function getClient(): Promise<Client> {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is not set");
   }
-  return pool;
+  const client = new Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+  });
+  await client.connect();
+  return client;
 }
 
 function isDbConfigured(): boolean {
@@ -43,9 +44,13 @@ export async function sql(
     }
   }
 
-  const p = getPool();
-  const result = await p.query(text, values);
-  return { rows: result.rows, rowCount: result.rowCount };
+  const client = await getClient();
+  try {
+    const result = await client.query(text, values);
+    return { rows: result.rows, rowCount: result.rowCount };
+  } finally {
+    await client.end();
+  }
 }
 
 // Alias
@@ -59,9 +64,13 @@ export async function rawQuery(
   if (!isDbConfigured()) {
     return { rows: [], rowCount: 0 };
   }
-  const p = getPool();
-  const result = await p.query(queryText, params);
-  return { rows: result.rows, rowCount: result.rowCount };
+  const client = await getClient();
+  try {
+    const result = await client.query(queryText, params);
+    return { rows: result.rows, rowCount: result.rowCount };
+  } finally {
+    await client.end();
+  }
 }
 
 export async function initializeDatabase() {
@@ -71,9 +80,10 @@ export async function initializeDatabase() {
     );
   }
 
-  const p = getPool();
+  const client = await getClient();
 
-  await p.query(`
+  try {
+  await client.query(`
     CREATE TABLE IF NOT EXISTS heartbeats (
       id SERIAL PRIMARY KEY,
       status VARCHAR(20) NOT NULL,
@@ -84,7 +94,7 @@ export async function initializeDatabase() {
     )
   `);
 
-  await p.query(`
+  await client.query(`
     CREATE TABLE IF NOT EXISTS activity_log (
       id SERIAL PRIMARY KEY,
       action VARCHAR(100) NOT NULL,
@@ -97,7 +107,7 @@ export async function initializeDatabase() {
     )
   `);
 
-  await p.query(`
+  await client.query(`
     CREATE TABLE IF NOT EXISTS daily_costs (
       id SERIAL PRIMARY KEY,
       date DATE NOT NULL,
@@ -111,7 +121,7 @@ export async function initializeDatabase() {
     )
   `);
 
-  await p.query(`
+  await client.query(`
     CREATE TABLE IF NOT EXISTS tasks (
       id VARCHAR(50) PRIMARY KEY,
       workspace VARCHAR(20) NOT NULL,
@@ -133,7 +143,7 @@ export async function initializeDatabase() {
     )
   `);
 
-  await p.query(`
+  await client.query(`
     CREATE TABLE IF NOT EXISTS task_comments (
       id VARCHAR(50) PRIMARY KEY,
       task_id VARCHAR(50) REFERENCES tasks(id) ON DELETE CASCADE,
@@ -143,7 +153,7 @@ export async function initializeDatabase() {
     )
   `);
 
-  await p.query(`
+  await client.query(`
     CREATE TABLE IF NOT EXISTS sessions (
       id SERIAL PRIMARY KEY,
       session_id VARCHAR(100),
@@ -159,7 +169,7 @@ export async function initializeDatabase() {
     )
   `);
 
-  await p.query(`
+  await client.query(`
     CREATE TABLE IF NOT EXISTS system_health (
       id SERIAL PRIMARY KEY,
       gateway_status VARCHAR(20),
@@ -175,11 +185,14 @@ export async function initializeDatabase() {
     )
   `);
 
-  await p.query(`
+  await client.query(`
     CREATE TABLE IF NOT EXISTS kv_store (
       key VARCHAR(200) PRIMARY KEY,
       value JSONB NOT NULL,
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  } finally {
+    await client.end();
+  }
 }
