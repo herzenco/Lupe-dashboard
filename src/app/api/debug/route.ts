@@ -16,14 +16,33 @@ export async function GET() {
       .limit(1);
 
     if (error) {
-      results.db_error = error.message;
+      results.select_error = error.message;
     } else {
       results.db_connected = "yes";
       results.heartbeats_count = String(data?.length || 0);
     }
   } catch (e: unknown) {
     const err = e as Error;
-    results.db_error = err.message;
+    results.select_error = err.message;
+  }
+
+  // Test INSERT
+  try {
+    const { error: insertErr } = await supabase.from("heartbeats").insert({
+      status: "idle",
+      session_type: "debug-test",
+      current_task: "testing insert from Vercel",
+      current_model: "debug",
+    });
+
+    if (insertErr) {
+      results.insert_error = insertErr.message + " | " + insertErr.code;
+    } else {
+      results.insert_ok = "yes";
+    }
+  } catch (e: unknown) {
+    const err = e as Error;
+    results.insert_error = err.message;
   }
 
   return NextResponse.json(results);
