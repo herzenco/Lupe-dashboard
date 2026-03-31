@@ -1,18 +1,24 @@
 import { NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const result = await sql`
-      DELETE FROM sessions
-      WHERE created_at < NOW() - INTERVAL '30 days'
-    `;
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const { data, error } = await supabase
+      .from("sessions")
+      .delete()
+      .lt("created_at", thirtyDaysAgo.toISOString())
+      .select("id");
+
+    if (error) throw error;
 
     return NextResponse.json({
       ok: true,
-      deleted: result.rowCount,
+      deleted: data?.length || 0,
     });
   } catch (error) {
     console.error("Cron cleanup-sessions error:", error);

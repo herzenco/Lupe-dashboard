@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { rawQuery } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { requireAuth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -15,37 +15,34 @@ export async function GET(request: NextRequest) {
     const channel = searchParams.get("channel");
     const search = searchParams.get("search");
 
-    let query = `
-      SELECT id, session_id, channel, model, summary,
-             token_count, cost_usd, started_at, ended_at
-      FROM sessions WHERE 1=1
-    `;
-    const params: unknown[] = [];
-    let paramIndex = 1;
+    let query = supabase
+      .from("sessions")
+      .select(
+        "id, session_id, channel, model, summary, token_count, cost_usd, started_at, ended_at"
+      )
+      .order("started_at", { ascending: false, nullsFirst: false })
+      .limit(100);
 
     if (from) {
-      query += ` AND started_at >= $${paramIndex++}::timestamp`;
-      params.push(from);
+      query = query.gte("started_at", from);
     }
     if (to) {
-      query += ` AND started_at <= $${paramIndex++}::timestamp`;
-      params.push(to);
+      query = query.lte("started_at", to);
     }
     if (channel) {
-      query += ` AND channel = $${paramIndex++}`;
-      params.push(channel);
+      query = query.eq("channel", channel);
     }
     if (search) {
-      query += ` AND (summary ILIKE $${paramIndex} OR session_id ILIKE $${paramIndex})`;
-      params.push(`%${search}%`);
-      paramIndex++;
+      query = query.or(
+        `summary.ilike.%${search}%,session_id.ilike.%${search}%`
+      );
     }
 
-    query += ` ORDER BY started_at DESC NULLS LAST LIMIT 100`;
+    const { data, error } = await query;
 
-    const result = await rawQuery(query, params);
+    if (error) throw error;
 
-    return NextResponse.json(result.rows);
+    return NextResponse.json(data || []);
   } catch (error) {
     console.error("Sessions list error:", error);
     return NextResponse.json(

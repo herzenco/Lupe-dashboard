@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -31,52 +31,43 @@ async function syncWorkspace(teamId: string, workspace: string) {
   );
 
   if (!response.ok) {
-    throw new Error(`ClickUp API error for ${workspace}: ${response.status}`);
+    throw new Error(
+      `ClickUp API error for ${workspace}: ${response.status}`
+    );
   }
 
   const data = await response.json();
   const tasks: ClickUpTask[] = data.tasks || [];
 
   for (const task of tasks) {
-    await sql`
-      INSERT INTO tasks (
-        id, workspace, team_id, space_name, folder_name, list_name,
-        name, description, status, priority, assignees, due_date,
-        tags, url, created_at, updated_at, synced_at
-      ) VALUES (
-        ${task.id},
-        ${workspace},
-        ${teamId},
-        ${task.space?.name || null},
-        ${task.folder?.name || null},
-        ${task.list?.name || null},
-        ${task.name},
-        ${task.description || ""},
-        ${task.status?.status || ""},
-        ${task.priority?.orderindex || null},
-        ${JSON.stringify(task.assignees || [])},
-        ${task.due_date ? new Date(parseInt(task.due_date)).toISOString() : null},
-        ${JSON.stringify(task.tags || [])},
-        ${task.url || ""},
-        ${task.date_created ? new Date(parseInt(task.date_created)).toISOString() : null},
-        ${task.date_updated ? new Date(parseInt(task.date_updated)).toISOString() : null},
-        NOW()
-      )
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        description = EXCLUDED.description,
-        status = EXCLUDED.status,
-        priority = EXCLUDED.priority,
-        assignees = EXCLUDED.assignees,
-        due_date = EXCLUDED.due_date,
-        tags = EXCLUDED.tags,
-        url = EXCLUDED.url,
-        space_name = EXCLUDED.space_name,
-        folder_name = EXCLUDED.folder_name,
-        list_name = EXCLUDED.list_name,
-        updated_at = EXCLUDED.updated_at,
-        synced_at = NOW()
-    `;
+    await supabase.from("tasks").upsert(
+      {
+        id: task.id,
+        workspace,
+        team_id: teamId,
+        space_name: task.space?.name || null,
+        folder_name: task.folder?.name || null,
+        list_name: task.list?.name || null,
+        name: task.name,
+        description: task.description || "",
+        status: task.status?.status || "",
+        priority: task.priority?.orderindex || null,
+        assignees: task.assignees || [],
+        due_date: task.due_date
+          ? new Date(parseInt(task.due_date)).toISOString()
+          : null,
+        tags: task.tags || [],
+        url: task.url || "",
+        created_at: task.date_created
+          ? new Date(parseInt(task.date_created)).toISOString()
+          : null,
+        updated_at: task.date_updated
+          ? new Date(parseInt(task.date_updated)).toISOString()
+          : null,
+        synced_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
   }
 
   return tasks.length;

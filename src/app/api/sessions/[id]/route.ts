@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { requireAuth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -14,18 +14,20 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const result = await sql`
-      SELECT * FROM sessions WHERE id = ${id}
-    `;
+    const { data, error } = await supabase
+      .from("sessions")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error || !data) {
       return NextResponse.json(
         { error: "Session not found" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json(result.rows[0]);
+    return NextResponse.json(data);
   } catch (error) {
     console.error("Session detail error:", error);
     return NextResponse.json(

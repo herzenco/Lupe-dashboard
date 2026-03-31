@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { validateLupeApiKey, requireAuth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -13,22 +13,52 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { action, detail, model, tokens_in, tokens_out, cost_usd } = body;
 
-    await sql`
-      INSERT INTO activity_log (action, detail, model, tokens_in, tokens_out, cost_usd)
-      VALUES (${action}, ${detail}, ${model}, ${tokens_in}, ${tokens_out}, ${cost_usd})
-    `;
+    // Insert activity log
+    const { error: activityError } = await supabase
+      .from("activity_log")
+      .insert({ action, detail, model, tokens_in, tokens_out, cost_usd });
 
+    if (activityError) throw activityError;
+
+    // Upsert daily costs (read-modify-write since we need to increment)
     const today = new Date().toISOString().split("T")[0];
-    await sql`
-      INSERT INTO daily_costs (date, model, tokens_in, tokens_out, cost_usd, session_count)
-      VALUES (${today}, ${model || "unknown"}, ${tokens_in || 0}, ${tokens_out || 0}, ${cost_usd || 0}, 1)
-      ON CONFLICT (date, model) DO UPDATE SET
-        tokens_in = daily_costs.tokens_in + EXCLUDED.tokens_in,
-        tokens_out = daily_costs.tokens_out + EXCLUDED.tokens_out,
-        cost_usd = daily_costs.cost_usd + EXCLUDED.cost_usd,
-        session_count = daily_costs.session_count + 1,
-        updated_at = NOW()
-    `;
+    const modelName = model || "unknown";
+
+    const { data: existing } = await supabase
+      .from("daily_costs")
+      .select("*")
+      .eq("date", today)
+      .eq("model", modelName)
+      .single();
+
+    if (existing) {
+      const { error: updateError } = await supabase
+        .from("daily_costs")
+        .update({
+          tokens_in: (existing.tokens_in || 0) + (tokens_in || 0),
+          tokens_out: (existing.tokens_out || 0) + (tokens_out || 0),
+          cost_usd: Number(existing.cost_usd || 0) + (cost_usd || 0),
+          session_count: (existing.session_count || 0) + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("date", today)
+        .eq("model", modelName);
+
+      if (updateError) throw updateError;
+    } else {
+      const { error: insertError } = await supabase
+        .from("daily_costs")
+        .insert({
+          date: today,
+          model: modelName,
+          tokens_in: tokens_in || 0,
+          tokens_out: tokens_out || 0,
+          cost_usd: cost_usd || 0,
+          session_count: 1,
+        });
+
+      if (insertError) throw insertError;
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
@@ -45,13 +75,15 @@ export async function GET() {
   if (authError) return authError;
 
   try {
-    const result = await sql`
-      SELECT * FROM activity_log
-      ORDER BY created_at DESC
-      LIMIT 50
-    `;
+    const { data, error } = await supabase
+      .from("activity_log")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50);
 
-    return NextResponse.json(result.rows);
+    if (error) throw error;
+
+    return NextResponse.json(data || []);
   } catch (error) {
     console.error("Activity GET error:", error);
     return NextResponse.json(

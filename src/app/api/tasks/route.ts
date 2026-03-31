@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { rawQuery } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { requireAuth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -15,33 +15,31 @@ export async function GET(request: NextRequest) {
     const assignee = searchParams.get("assignee");
     const search = searchParams.get("search");
 
-    let query = `SELECT * FROM tasks WHERE 1=1`;
-    const params: unknown[] = [];
-    let paramIndex = 1;
+    let query = supabase
+      .from("tasks")
+      .select("*")
+      .order("updated_at", { ascending: false, nullsFirst: false });
 
     if (workspace) {
-      query += ` AND workspace = $${paramIndex++}`;
-      params.push(workspace);
+      query = query.eq("workspace", workspace);
     }
     if (status) {
-      query += ` AND status = $${paramIndex++}`;
-      params.push(status);
+      query = query.eq("status", status);
     }
     if (assignee) {
-      query += ` AND assignees @> $${paramIndex++}::jsonb`;
-      params.push(JSON.stringify([{ username: assignee }]));
+      query = query.contains("assignees", [{ username: assignee }]);
     }
     if (search) {
-      query += ` AND (name ILIKE $${paramIndex} OR description ILIKE $${paramIndex})`;
-      params.push(`%${search}%`);
-      paramIndex++;
+      query = query.or(
+        `name.ilike.%${search}%,description.ilike.%${search}%`
+      );
     }
 
-    query += ` ORDER BY updated_at DESC NULLS LAST`;
+    const { data, error } = await query;
 
-    const result = await rawQuery(query, params);
+    if (error) throw error;
 
-    return NextResponse.json(result.rows);
+    return NextResponse.json(data || []);
   } catch (error) {
     console.error("Tasks error:", error);
     return NextResponse.json(

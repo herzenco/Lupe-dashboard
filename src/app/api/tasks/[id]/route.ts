@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { requireAuth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -14,23 +14,25 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const taskResult = await sql`
-      SELECT * FROM tasks WHERE id = ${id}
-    `;
+    const { data: task, error: taskError } = await supabase
+      .from("tasks")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-    if (taskResult.rows.length === 0) {
+    if (taskError || !task) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    const commentsResult = await sql`
-      SELECT * FROM task_comments
-      WHERE task_id = ${id}
-      ORDER BY created_at DESC
-    `;
+    const { data: comments } = await supabase
+      .from("task_comments")
+      .select("*")
+      .eq("task_id", id)
+      .order("created_at", { ascending: false });
 
     return NextResponse.json({
-      task: taskResult.rows[0],
-      comments: commentsResult.rows,
+      task,
+      comments: comments || [],
     });
   } catch (error) {
     console.error("Task detail error:", error);

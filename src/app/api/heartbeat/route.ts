@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { validateLupeApiKey } from "@/lib/auth";
-import { setLupeStatus } from "@/lib/kv";
 
 export const dynamic = "force-dynamic";
 
@@ -14,18 +13,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { status, session_type, current_task, current_model } = body;
 
-    await sql`
-      INSERT INTO heartbeats (status, session_type, current_task, current_model)
-      VALUES (${status}, ${session_type}, ${current_task}, ${current_model})
-    `;
-
-    await setLupeStatus({
+    const { error } = await supabase.from("heartbeats").insert({
       status,
-      session_type: session_type || "",
-      current_task: current_task || "",
-      current_model: current_model || "",
-      last_heartbeat: new Date().toISOString(),
+      session_type,
+      current_task,
+      current_model,
     });
+
+    if (error) throw error;
 
     return NextResponse.json({ ok: true });
   } catch (error) {

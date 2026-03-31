@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { validateLupeApiKey } from "@/lib/auth";
-import { setSystemHealth } from "@/lib/kv";
 
 export const dynamic = "force-dynamic";
 
@@ -24,20 +23,7 @@ export async function POST(request: NextRequest) {
       error_log,
     } = body;
 
-    await sql`
-      INSERT INTO system_health (
-        gateway_status, gateway_uptime_seconds, mac_uptime_seconds,
-        cpu_percent, memory_percent, disk_percent,
-        telegram_status, drive_sync_status, error_log
-      )
-      VALUES (
-        ${gateway_status}, ${gateway_uptime_seconds}, ${mac_uptime_seconds},
-        ${cpu_percent}, ${memory_percent}, ${disk_percent},
-        ${telegram_status}, ${drive_sync_status}, ${JSON.stringify(error_log || [])}
-      )
-    `;
-
-    await setSystemHealth({
+    const { error } = await supabase.from("system_health").insert({
       gateway_status,
       gateway_uptime_seconds,
       mac_uptime_seconds,
@@ -47,8 +33,9 @@ export async function POST(request: NextRequest) {
       telegram_status,
       drive_sync_status,
       error_log: error_log || [],
-      updated_at: new Date().toISOString(),
     });
+
+    if (error) throw error;
 
     return NextResponse.json({ ok: true });
   } catch (error) {
