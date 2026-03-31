@@ -23,10 +23,11 @@ export async function POST(request: NextRequest) {
     if (error) throw error;
 
     return NextResponse.json({ ok: true });
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error & { message?: string; code?: string; details?: string };
     console.error("Heartbeat error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: err?.message || "Internal server error", code: err?.code, details: err?.details },
       { status: 500 }
     );
   }
