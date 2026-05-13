@@ -85,6 +85,21 @@ openclaw cron add --schedule "*/30 * * * *" --name "sync-dashboard" \
 - `GET /api/status` - Get current status (requires auth)
 - `GET /api/costs` - Get usage costs
 - `POST /api/webhooks/clickup` - Receive ClickUp webhooks
+- `GET /api/cron/publish-linkedin` - Publish approved ClickUp tasks from list `901416157162` to LinkedIn
+
+### LinkedIn Publish Cron
+
+The LinkedIn cron route reads tasks from ClickUp list `901416157162`, filters for `approved` tasks due today or overdue, publishes the task description to LinkedIn using the legacy working `v2/ugcPosts` endpoint, then marks the task complete in ClickUp and leaves a comment with the LinkedIn URN and URL.
+
+Safe test examples:
+
+```bash
+# Dry run, first eligible task only
+curl "http://localhost:3000/api/cron/publish-linkedin?dryRun=1&limit=1"
+
+# Real run, one specific task only
+curl "http://localhost:3000/api/cron/publish-linkedin?taskIds=86b9t6kxx&limit=1"
+```
 
 ## Security Notes
 
