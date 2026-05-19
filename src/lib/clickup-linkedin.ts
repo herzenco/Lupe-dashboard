@@ -7,6 +7,15 @@ type ClickUpStatus = {
   type?: string;
 };
 
+type ClickUpComment = {
+  comment_text?: string;
+  user?: {
+    username?: string;
+    email?: string;
+  };
+  date?: string | number;
+};
+
 type ClickUpTask = {
   id: string;
   name: string;
@@ -43,6 +52,16 @@ type PublishResult = {
   clickupStatusApplied?: string;
 };
 
+type RejectedAuditResult = {
+  taskId: string;
+  taskName: string;
+  dueDate: string | null;
+  commentsCount: number;
+  latestComment?: string;
+  latestCommentAuthor?: string;
+  latestCommentDate?: string;
+};
+
 type PublishSummary = {
   ok: boolean;
   dryRun: boolean;
@@ -54,6 +73,8 @@ type PublishSummary = {
   posted: number;
   skipped: number;
   failed: number;
+  rejectedReviewed: number;
+  rejected: RejectedAuditResult[];
   results: PublishResult[];
 };
 
@@ -83,11 +104,18 @@ function dateInTimeZone(date: Date, timeZone: string): string {
   }).format(date);
 }
 
-function isDueTodayOrOverdue(dueDateMs?: string | null): boolean {
+function isoFromMs(value?: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(Number(value));
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function isDueToday(dueDateMs?: string | null): boolean {
   if (!dueDateMs) return false;
   const dueDate = new Date(Number(dueDateMs));
   if (Number.isNaN(dueDate.getTime())) return false;
-  return dateInTimeZone(dueDate, TARGET_TIME_ZONE) <= todayInTimeZone(TARGET_TIME_ZONE);
+  return dateInTimeZone(dueDate, TARGET_TIME_ZONE) === todayInTimeZone(TARGET_TIME_ZONE);
 }
 
 function normalizeStatus(status?: string): string {
@@ -101,6 +129,11 @@ function extractPostBody(task: ClickUpTask): string {
 function buildLinkedInUrl(linkedinUrn?: string): string | undefined {
   if (!linkedinUrn) return undefined;
   return `https://www.linkedin.com/feed/update/${encodeURIComponent(linkedinUrn)}/`;
+}
+
+function safeCommentPreview(text?: string): string | undefined {
+  if (!text) return undefined;
+  return text.replace(/\s+/g, " ").trim().slice(0, 280);
 }
 
 async function clickUpFetch(path: string, init?: RequestInit) {
@@ -133,6 +166,12 @@ async function getListTasks(): Promise<ClickUpTask[]> {
   );
   const data = await response.json();
   return data.tasks || [];
+}
+
+async function getTaskComments(taskId: string): Promise<ClickUpComment[]> {
+  const response = await clickUpFetch(`/task/${taskId}/comment`);
+  const data = await response.json();
+  return data.comments || [];
 }
 
 async function updateTaskStatus(taskId: string, status: string) {
@@ -207,14 +246,39 @@ function getCompletionStatus(list: ClickUpList): string {
   throw new Error(`List ${list.id} does not have a Posted or Complete status`);
 }
 
-function getEligibleTasks(tasks: ClickUpTask[], taskIds?: string[]): ClickUpTask[] {
+function getApprovedTasksDueToday(tasks: ClickUpTask[], taskIds?: string[]): ClickUpTask[] {
   const taskIdSet = taskIds?.length ? new Set(taskIds) : null;
 
   return tasks.filter((task) => {
     if (taskIdSet && !taskIdSet.has(task.id)) return false;
     if (normalizeStatus(task.status?.status) !== "approved") return false;
-    return isDueTodayOrOverdue(task.due_date);
+    return isDueToday(task.due_date);
   });
+}
+
+function getRejectedTasks(tasks: ClickUpTask[]): ClickUpTask[] {
+  return tasks.filter((task) => normalizeStatus(task.status?.status) === "rejected");
+}
+
+async function auditRejectedTasks(tasks: ClickUpTask[]): Promise<RejectedAuditResult[]> {
+  const rejectedTasks = getRejectedTasks(tasks);
+  const audits: RejectedAuditResult[] = [];
+
+  for (const task of rejectedTasks) {
+    const comments = await getTaskComments(task.id);
+    const latest = comments[comments.length - 1];
+    audits.push({
+      taskId: task.id,
+      taskName: task.name,
+      dueDate: isoFromMs(task.due_date),
+      commentsCount: comments.length,
+      latestComment: safeCommentPreview(latest?.comment_text),
+      latestCommentAuthor: latest?.user?.username || latest?.user?.email,
+      latestCommentDate: latest?.date ? new Date(Number(latest.date)).toISOString() : undefined,
+    });
+  }
+
+  return audits;
 }
 
 export async function publishApprovedClickUpPosts(
@@ -223,14 +287,15 @@ export async function publishApprovedClickUpPosts(
   const list = await getList();
   const tasks = await getListTasks();
   const completionStatus = getCompletionStatus(list);
-  const eligibleTasks = getEligibleTasks(tasks, options.taskIds);
-  const limitedTasks = typeof options.limit === "number" ? eligibleTasks.slice(0, options.limit) : eligibleTasks;
+  const eligibleTasks = getApprovedTasksDueToday(tasks, options.taskIds);
+  const limitedTasks =
+    typeof options.limit === "number" ? eligibleTasks.slice(0, options.limit) : eligibleTasks;
 
   const results: PublishResult[] = [];
 
   for (const task of limitedTasks) {
     const postBody = extractPostBody(task);
-    const dueDate = task.due_date ? new Date(Number(task.due_date)).toISOString() : null;
+    const dueDate = isoFromMs(task.due_date);
 
     if (!postBody) {
       results.push({
@@ -291,8 +356,11 @@ export async function publishApprovedClickUpPosts(
     }
   }
 
+  const rejected = await auditRejectedTasks(tasks);
   const posted = results.filter((item) => item.action === "posted").length;
-  const skipped = results.filter((item) => item.action === "skipped" || item.action === "would_post").length;
+  const skipped = results.filter(
+    (item) => item.action === "skipped" || item.action === "would_post"
+  ).length;
   const failed = results.filter((item) => item.action === "failed").length;
 
   return {
@@ -306,6 +374,8 @@ export async function publishApprovedClickUpPosts(
     posted,
     skipped,
     failed,
+    rejectedReviewed: rejected.length,
+    rejected,
     results,
   };
 }
