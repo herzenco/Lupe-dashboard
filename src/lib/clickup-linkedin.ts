@@ -122,8 +122,39 @@ function normalizeStatus(status?: string): string {
   return (status || "").trim().toLowerCase();
 }
 
+function formatLinkedInPost(raw: string): string {
+  const text = raw.replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+
+  const hashtags = (text.match(/#[A-Za-z0-9_]+/g) || []).join(" ").trim();
+  const withoutHashtags = text.replace(/\s*#[A-Za-z0-9_]+/g, "").trim();
+  const sentences = withoutHashtags
+    .replace(/\n+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const blocks: string[] = [];
+  let current: string[] = [];
+
+  for (const sentence of sentences) {
+    current.push(sentence);
+    if (current.length >= 2 || sentence.endsWith(":") || sentence.length < 90) {
+      blocks.push(current.join(" ").trim());
+      current = [];
+    }
+  }
+
+  if (current.length) {
+    blocks.push(current.join(" ").trim());
+  }
+
+  const formatted = blocks.join("\n\n").trim();
+  return hashtags ? `${formatted}\n\n${hashtags}`.trim() : formatted;
+}
+
 function extractPostBody(task: ClickUpTask): string {
-  return (task.description || "").trim();
+  return formatLinkedInPost(task.description || "");
 }
 
 function buildLinkedInUrl(linkedinUrn?: string): string | undefined {
